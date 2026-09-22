@@ -84,6 +84,63 @@
 
 LOG_MODULE_DECLARE(zmk, CONFIG_ZMK_LOG_LEVEL);
 
+/* DYA inertia runtime hook (Phase2a). weak既定 = 素のDT動作。
+ * strong実装 (dya_inertia_resolve) は zmk-feature-inertia-config が提供する。
+ * Kconfig=n では下記全て無効。 */
+#if defined(CONFIG_ZMK_INERTIA_RUNTIME)
+__weak bool dya_inertia_resolve(const struct device *dev, int32_t *friction,
+                                int32_t *limit, int32_t *decay_fast,
+                                int32_t *decay_slow, int32_t *decay_tail,
+                                int32_t *fast, int32_t *slow, int32_t *start,
+                                int32_t *move, int32_t *stop) {
+    ARG_UNUSED(dev);
+    ARG_UNUSED(friction);
+    ARG_UNUSED(limit);
+    ARG_UNUSED(decay_fast);
+    ARG_UNUSED(decay_slow);
+    ARG_UNUSED(decay_tail);
+    ARG_UNUSED(fast);
+    ARG_UNUSED(slow);
+    ARG_UNUSED(start);
+    ARG_UNUSED(move);
+    ARG_UNUSED(stop);
+    return false;
+}
+
+/* 単一effective領域。configはフラットな値構造体のためシャローコピーで足りる。
+ * 3ハンドラはsystem workqueue直列のため単一面で足りる。 */
+static struct scroll_inertia_config dya_inertia_eff;
+
+static const struct scroll_inertia_config *
+dya_inertia_effective(const struct scroll_inertia_config *cfg,
+                       const struct device *dev) {
+    int32_t fr = 0, lim = 0, df = 0, ds = 0, dtl = 0;
+    int32_t fa = 0, sl = 0, st = 0, mo = 0, sp = 0;
+    if (!dya_inertia_resolve(dev, &fr, &lim, &df, &ds, &dtl, &fa, &sl, &st, &mo,
+                             &sp)) {
+        return cfg;
+    }
+    if (fr < 0 || fr > 1000 || lim < 1 || lim > 4000 || df < 800 || df > 999 ||
+        ds < 800 || ds > 999 || dtl < 800 || dtl > 999 || fa < 0 || fa > 4000 ||
+        sl < 0 || sl > 4000 || st < 1 || st > 2000 || mo < 1 || mo > 2000 ||
+        sp < 1 || sp > 500) {
+        return cfg; /* fail-closed。範囲外はDTにfallback */
+    }
+    dya_inertia_eff = *cfg;
+    dya_inertia_eff.friction_fp = fr * FP_SCALE / 1000;
+    dya_inertia_eff.limit_fp = lim * FP_SCALE;
+    dya_inertia_eff.decay_fast = df;
+    dya_inertia_eff.decay_slow = ds;
+    dya_inertia_eff.decay_tail = dtl;
+    dya_inertia_eff.fast_fp = fa * FP_SCALE;
+    dya_inertia_eff.slow_fp = sl * FP_SCALE;
+    dya_inertia_eff.start_fp = st * FP_SCALE;
+    dya_inertia_eff.move = mo;
+    dya_inertia_eff.stop_fp = sp * FP_SCALE;
+    return &dya_inertia_eff;
+}
+#endif
+
 /* Axis mode constants */
 #define AXIS_BOTH 0
 #define AXIS_Y    1
@@ -851,6 +908,9 @@ static void inertia_tick_handler(struct k_work *work) {
     struct scroll_inertia_data *data =
         CONTAINER_OF(dwork, struct scroll_inertia_data, inertia_tick_work);
     const struct scroll_inertia_config *cfg = data->dev->config;
+#if defined(CONFIG_ZMK_INERTIA_RUNTIME)
+    cfg = dya_inertia_effective(cfg, data->dev);
+#endif
 
     if (data->state != SS_COASTING) {
         return;
@@ -950,6 +1010,9 @@ static void stop_detect_handler(struct k_work *work) {
     struct scroll_inertia_data *data =
         CONTAINER_OF(dwork, struct scroll_inertia_data, stop_detect_work);
     const struct scroll_inertia_config *cfg = data->dev->config;
+#if defined(CONFIG_ZMK_INERTIA_RUNTIME)
+    cfg = dya_inertia_effective(cfg, data->dev);
+#endif
 
     /* stop_detect only runs as a TRACKING → {COASTING | IDLE} bridge;
      * if we somehow fire while coasting or idle, noop. */
@@ -987,6 +1050,9 @@ static int scroll_inertia_handle_event(const struct device *dev,
                                        struct zmk_input_processor_state *state) {
     struct scroll_inertia_data *data = dev->data;
     const struct scroll_inertia_config *cfg = dev->config;
+#if defined(CONFIG_ZMK_INERTIA_RUNTIME)
+    cfg = dya_inertia_effective(cfg, dev);
+#endif
 
     int32_t ax = effective_axis(cfg);
     enum event_class ec = classify_event(event, ax);
