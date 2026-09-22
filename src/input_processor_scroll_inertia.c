@@ -88,12 +88,14 @@ LOG_MODULE_DECLARE(zmk, CONFIG_ZMK_LOG_LEVEL);
  * strong実装 (dya_inertia_resolve) は zmk-feature-inertia-config が提供する。
  * Kconfig=n では下記全て無効。 */
 #if defined(CONFIG_ZMK_INERTIA_RUNTIME)
-__weak bool dya_inertia_resolve(const struct device *dev, int32_t *friction,
-                                int32_t *limit, int32_t *decay_fast,
-                                int32_t *decay_slow, int32_t *decay_tail,
-                                int32_t *fast, int32_t *slow, int32_t *start,
-                                int32_t *move, int32_t *stop) {
+__weak bool dya_inertia_resolve(const struct device *dev, int32_t *enabled,
+                                int32_t *friction, int32_t *limit,
+                                int32_t *decay_fast, int32_t *decay_slow,
+                                int32_t *decay_tail, int32_t *fast,
+                                int32_t *slow, int32_t *start, int32_t *move,
+                                int32_t *stop) {
     ARG_UNUSED(dev);
+    ARG_UNUSED(enabled);
     ARG_UNUSED(friction);
     ARG_UNUSED(limit);
     ARG_UNUSED(decay_fast);
@@ -114,10 +116,21 @@ static struct scroll_inertia_config dya_inertia_eff;
 static const struct scroll_inertia_config *
 dya_inertia_effective(const struct scroll_inertia_config *cfg,
                        const struct device *dev) {
-    int32_t fr = 0, lim = 0, df = 0, ds = 0, dtl = 0;
+    int32_t en = 1, fr = 0, lim = 0, df = 0, ds = 0, dtl = 0;
     int32_t fa = 0, sl = 0, st = 0, mo = 0, sp = 0;
-    if (!dya_inertia_resolve(dev, &fr, &lim, &df, &ds, &dtl, &fa, &sl, &st, &mo,
-                             &sp)) {
+    if (!dya_inertia_resolve(dev, &en, &fr, &lim, &df, &ds, &dtl, &fa, &sl, &st,
+                             &mo, &sp)) {
+        return cfg;
+    }
+    if (en == 0) {
+        /* off: 新規arm不能 + 進行中coast即停止。 */
+        dya_inertia_eff = *cfg;
+        dya_inertia_eff.start_fp = INT32_MAX / 2;
+        dya_inertia_eff.move = INT32_MAX;
+        dya_inertia_eff.stop_fp = INT32_MAX;
+        return &dya_inertia_eff;
+    }
+    if (en != 1) {
         return cfg;
     }
     if (fr < 0 || fr > 1000 || lim < 1 || lim > 4000 || df < 800 || df > 999 ||
