@@ -53,6 +53,7 @@ struct scroll_inertia_config {
     int32_t layer;
     int32_t swap_mod;
     int32_t unlock_mod;
+    int32_t pause_mod;
 
     int32_t min_events;
     int32_t decel_samples;

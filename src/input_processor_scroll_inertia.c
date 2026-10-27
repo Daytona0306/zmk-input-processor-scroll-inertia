@@ -342,6 +342,12 @@ static inline bool unlock_active(const struct scroll_inertia_config *cfg) {
     return (zmk_hid_get_explicit_mods() & cfg->unlock_mod) != 0;
 }
 
+/* Returns true if any of the configured pause-modifier bits are held. */
+static inline bool pause_active(const struct scroll_inertia_config *cfg) {
+    if (cfg->pause_mod == 0) return false;
+    return (zmk_hid_get_explicit_mods() & cfg->pause_mod) != 0;
+}
+
 /* The axis to use right now.  When unlock-mod is held, the configured
  * axis is overridden to AXIS_BOTH so both axes flow freely. */
 static inline int32_t effective_axis(const struct scroll_inertia_config *cfg) {
@@ -935,6 +941,14 @@ static void inertia_tick_handler(struct k_work *work) {
         return;
     }
 
+    /* Pause gate: a coast in flight must not keep emitting once the
+     * pause modifier goes down (e.g. Ctrl, where every wheel report
+     * becomes one zoom step on the host). */
+    if (pause_active(cfg)) {
+        to_idle(data);
+        return;
+    }
+
     /* Duration gate (safety cap only — the natural exponential decay
      * already gives lighter flicks shorter inertia because lower
      * initial velocity reaches the stop threshold sooner). */
@@ -1033,7 +1047,8 @@ static void stop_detect_handler(struct k_work *work) {
         return;
     }
 
-    if (cfg->layer >= 0 && !zmk_keymap_layer_active(cfg->layer)) {
+    if ((cfg->layer >= 0 && !zmk_keymap_layer_active(cfg->layer)) ||
+        pause_active(cfg)) {
         to_idle(data);
         return;
     }
@@ -1071,6 +1086,15 @@ static int scroll_inertia_handle_event(const struct device *dev,
     enum event_class ec = classify_event(event, ax);
 
     if (ec == EC_UNTRACKED) {
+        return ZMK_INPUT_PROC_CONTINUE;
+    }
+
+    /* While paused, stay out of the way entirely: drop any gesture
+     * state and pass the event through untouched. */
+    if (pause_active(cfg)) {
+        if (data->state != SS_IDLE) {
+            to_idle(data);
+        }
         return ZMK_INPUT_PROC_CONTINUE;
     }
 
@@ -1190,6 +1214,7 @@ static struct zmk_input_processor_driver_api scroll_inertia_driver_api = {
         .layer      = DT_INST_PROP(n, layer),                                  \
         .swap_mod   = DT_INST_PROP(n, swap_mod),                              \
         .unlock_mod = DT_INST_PROP(n, unlock_mod),                            \
+        .pause_mod  = DT_INST_PROP(n, pause_mod),                             \
         .min_events         = DT_INST_PROP(n, min_events),                    \
         .decel_samples      = DT_INST_PROP(n, decel_samples),                 \
         .decel_ratio        = DT_INST_PROP(n, decel_ratio),                   \

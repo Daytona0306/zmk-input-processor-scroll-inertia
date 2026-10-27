@@ -250,6 +250,19 @@ properties:
       such as MOD_RGUI are usually safe; even safer is to bind the
       modifier only inside the scroll layer so it only ever fires
       while you're actively scrolling.
+  pause-mod:
+    type: int
+    default: 0
+    description: |
+      Modifier bitmask that, while held, disables inertia: no new
+      flick is armed, events pass through untouched, and a coast
+      already in flight stops on the next tick.  Set 0 to disable.
+
+      Meant for Ctrl / Cmd + scroll zoom, where hosts typically count
+      each wheel report as one zoom step, so a coast keeps zooming
+      long after the ball has stopped.
+
+      Example: pause-mod = <(MOD_LCTL|MOD_RCTL|MOD_LGUI|MOD_RGUI)>;
 
   # ── Advanced tuning ──────────────────────────────────────
   # These knobs expose the internal state-machine timing.  The
